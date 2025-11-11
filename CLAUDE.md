@@ -311,4 +311,4 @@ data/
 - `bad_files/`: Files rejected during cleansing
 - `bad_prediction_files/`: Files that failed during prediction
 - please always use a timeout of at least 5 minutes when executing python commands
-- the label values for the training for NO3 are in /home/payanico/pipeline_nitrates/data/reference_data/Lab_Values.xlsx and data for training is in /home/payanico/pipeline_nitrates/data/reference_data/Lab_Values.xlsx
+- the label values for the training for NO3 are in /home/payanico/nitrates_pipeline/data/reference_data/Lab_Values.xlsx and data for training is in /home/payanico/nitrates_pipeline/data/reference_data/Lab_Values.xlsx

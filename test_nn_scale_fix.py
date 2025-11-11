@@ -2,7 +2,7 @@
 """Test neural network with corrected ppm scale."""
 
 import sys
-sys.path.insert(0, '/home/payanico/pipeline_nitrates')
+sys.path.insert(0, '/home/payanico/nitrates_pipeline')
 
 import torch
 import numpy as np

@@ -846,7 +846,7 @@ class Config(BaseModel):
 
 
     # Custom validation set directory - if provided, will process raw files from this directory for validation
-    # custom_validation_dir: Optional[str] = "/home/payanico/pipeline_nitrates/data/raw/validation_set"
+    # custom_validation_dir: Optional[str] = "/home/payanico/nitrates_pipeline/data/raw/validation_set"
     custom_validation_dir: Optional[str] = None
 
     # Wavelength standardization configuration

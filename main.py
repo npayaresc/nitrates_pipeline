@@ -1984,11 +1984,11 @@ def main():
     # time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # args.stage = "train"
     # args.gpu = True  # Set to True to test GPU mode
-    # #args.input_dir = "/home/payanico/pipeline_nitrates/data/raw/data_5278_Phase3"
-    # args.input_dir = "/home/payanico/pipeline_nitrates/data/raw/combo_6_8"
-    # args.model_path = "/home/payanico/pipeline_nitrates/models/optimized_simple_only_xgboost_20250724_003832.pkl"
+    # #args.input_dir = "/home/payanico/nitrates_pipeline/data/raw/data_5278_Phase3"
+    # args.input_dir = "/home/payanico/nitrates_pipeline/data/raw/combo_6_8"
+    # args.model_path = "/home/payanico/nitrates_pipeline/models/optimized_simple_only_xgboost_20250724_003832.pkl"
     # args.output_file = f"batch_predictions_{time_stamp}.csv"
-    # args.reference_file = "/home/payanico/pipeline_nitrates/data/reference_data/Final_Lab_Data_Nico_New.xlsx"
+    # args.reference_file = "/home/payanico/nitrates_pipeline/data/reference_data/Final_Lab_Data_Nico_New.xlsx"
     
     try:
         use_gpu = getattr(args, 'gpu', False)

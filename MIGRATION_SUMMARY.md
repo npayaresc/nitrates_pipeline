@@ -220,6 +220,6 @@ python -m py_compile src/features/feature_helpers.py
 ---
 
 **Generated**: 2025-10-24
-**Pipeline**: pipeline_nitrates
+**Pipeline**: nitrates_pipeline
 **Base**: potassium_pipeline
 **Target**: NO3 (wt%) concentration prediction

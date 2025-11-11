@@ -46,7 +46,7 @@ def check_file_coverage(file_path: Path) -> dict:
 
 def main():
     # Check cleansed files
-    data_dir = Path("/home/payanico/pipeline_nitrates/data/cleansed_files_per_sample")
+    data_dir = Path("/home/payanico/nitrates_pipeline/data/cleansed_files_per_sample")
     files = list(data_dir.glob("*.txt"))[:20]  # Check first 20 files
 
     logger.info(f"Checking {len(files)} files for nitrogen region coverage...")
@@ -85,7 +85,7 @@ def main():
             logger.warning(f"  Problematic files: {list(problematic['file'].head(5))}")
 
     # Save detailed report
-    output_file = "/home/payanico/pipeline_nitrates/nitrogen_region_coverage_report.csv"
+    output_file = "/home/payanico/nitrates_pipeline/nitrogen_region_coverage_report.csv"
     summary_df.to_csv(output_file, index=False)
     logger.info(f"\nDetailed report saved to: {output_file}")
 

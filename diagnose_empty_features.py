@@ -26,7 +26,7 @@ def test_sample_feature_extraction():
     regions_list = [r.model_dump() for r in regions]
 
     # Test on a few sample files
-    data_dir = Path("/home/payanico/pipeline_nitrates/data/cleansed_files_per_sample")
+    data_dir = Path("/home/payanico/nitrates_pipeline/data/cleansed_files_per_sample")
     files = list(data_dir.glob("*.txt"))[:50]  # Test first 50 files
 
     logger.info(f"Testing feature extraction on {len(files)} files...")

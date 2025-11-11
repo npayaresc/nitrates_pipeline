@@ -4,7 +4,7 @@
 2025-10-24
 
 ## Overview
-This document tracks which files have been copied from `potassium_pipeline` to `pipeline_nitrates` and which have been adapted for nitrate (NO3) prediction.
+This document tracks which files have been copied from `potassium_pipeline` to `nitrates_pipeline` and which have been adapted for nitrate (NO3) prediction.
 
 ## Root-Level Files
 
@@ -249,7 +249,7 @@ All markdown files reviewed for:
 
 2. **Environment Setup**:
    ```bash
-   cd /home/payanico/pipeline_nitrates
+   cd /home/payanico/nitrates_pipeline
    uv sync
    ```
 
@@ -303,6 +303,6 @@ The entire `data/` directory has been successfully copied from potassium_pipelin
 ---
 
 **Last Updated**: 2025-10-24
-**Migration**: potassium_pipeline → pipeline_nitrates
+**Migration**: potassium_pipeline → nitrates_pipeline
 **Target**: NO3 (wt%) concentration prediction
 **Data Size**: 11GB (19,503 files)

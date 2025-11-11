@@ -2,7 +2,7 @@
 """Quick test script to validate adaptive neural network architecture."""
 
 import sys
-sys.path.insert(0, '/home/payanico/pipeline_nitrates')
+sys.path.insert(0, '/home/payanico/nitrates_pipeline')
 
 import torch
 import numpy as np
