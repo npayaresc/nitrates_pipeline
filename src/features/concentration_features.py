@@ -752,9 +752,12 @@ def create_enhanced_feature_pipeline_with_concentration(config, strategy: str, e
     if config.use_raw_spectral_data:
         # Raw spectral mode - add minimal concentration features for distribution awareness
         logger.info("Using raw spectral data with minimal concentration features for distribution handling")
-        
+
+        # Use parallel processing if enabled
+        raw_n_jobs = n_jobs if use_parallel else 1
+
         steps = [
-            ('raw_spectral', RawSpectralTransformer(config=config)),
+            ('raw_spectral', RawSpectralTransformer(config=config, strategy=strategy, n_jobs=raw_n_jobs)),
             ('minimal_concentration', MinimalConcentrationFeatures())
         ]
     else:

@@ -90,8 +90,12 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
     to machine learning models.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, strategy: str = "raw-spectral", n_jobs: int = -1):
         self.config = config
+        self.strategy = strategy
+        self.n_jobs = n_jobs  # Number of parallel jobs (-1 = all cores)
+        # Get regions based on strategy
+        self._regions = config.get_regions_for_strategy(strategy)
         self.extractor = SpectralFeatureExtractor(
             enable_preprocessing=config.use_spectral_preprocessing,
             preprocessing_method=config.spectral_preprocessing_method
@@ -158,9 +162,78 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
 
         return self
 
+    def _process_single_sample(self, idx, row):
+        """Process a single sample's spectral data (helper for parallel processing)."""
+        try:
+            wavelengths = np.asarray(row["wavelengths"])
+            intensities = np.asarray(row["intensities"])
+
+            if wavelengths.size == 0 or intensities.size == 0:
+                logger.warning(
+                    "Empty spectral data for sample %s, using zeros", idx
+                )
+                return {name: 0.0 for name in self.feature_names_out_}
+
+            # Use isolate_peaks to filter by PeakRegions (domain knowledge filtering)
+            # Ensure intensities is 2D for the extractor (expects n_wavelengths x n_spectra)
+            if intensities.ndim == 1:
+                intensities_2d = intensities.reshape(-1, 1)
+            else:
+                intensities_2d = intensities
+
+            # Process regions one by one to handle missing data gracefully
+            raw_data = {}
+
+            for region_config in self._regions:
+                try:
+                    # Try to extract this specific region
+                    region_results = self.extractor.isolate_peaks(
+                        wavelengths,
+                        intensities_2d,
+                        _convert_to_results_regions([region_config]),
+                        baseline_correction=self.config.baseline_correction,
+                        area_normalization=False,  # Keep raw intensities
+                    )
+
+                    # Process the single region result
+                    region_result = region_results[0]
+                    element = region_result.region.element
+                    region_wavelengths = region_result.wavelengths
+                    region_spectra = region_result.isolated_spectra  # Shape: (n_wavelengths, n_shots)
+
+                    # Average across shots (columns) to get single intensity per wavelength
+                    if region_spectra.ndim == 2:
+                        region_intensities = region_spectra.mean(axis=1)  # Average across shots
+                    else:
+                        region_intensities = region_spectra.flatten()
+
+                    # Check for NaN values in the averaged intensities
+                    if np.isnan(region_intensities).any():
+                        region_intensities = np.nan_to_num(region_intensities, nan=0.0)
+
+                    # Add each wavelength point as a separate feature
+                    for wl, intensity in zip(region_wavelengths, region_intensities):
+                        feature_name = f"{element}_wl_{wl:.2f}nm"
+                        # Ensure no NaN values are stored
+                        raw_data[feature_name] = 0.0 if np.isnan(intensity) else intensity
+
+                except ValueError:
+                    # Region not found in spectrum - fill with zeros for this region
+                    element = region_config.element
+                    # Fill expected features for this region with zeros
+                    for feature_name in self.feature_names_out_:
+                        if feature_name.startswith(f"{element}_wl_"):
+                            raw_data[feature_name] = 0.0
+
+            return raw_data
+
+        except Exception as e:
+            logger.warning("Error processing sample %s: %s, filling with zeros", idx, e)
+            return {name: 0.0 for name in self.feature_names_out_}
+
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """
-        Transform spectral data into raw filtered intensities.
+        Transform spectral data into raw filtered intensities (PARALLELIZED).
 
         Args:
             X: DataFrame with 'wavelengths' and 'intensities' columns
@@ -184,88 +257,17 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
             else:
                 raise ValueError(f"Expected 2 columns (wavelengths, intensities), got {X.shape[1]}")
 
-        results = []
-
-        for idx, row in X.iterrows():
-            try:
-                wavelengths = np.asarray(row["wavelengths"])
-                intensities = np.asarray(row["intensities"])
-
-                if wavelengths.size == 0 or intensities.size == 0:
-                    logger.warning(
-                        "Empty spectral data for sample %s, using NaN values", idx
-                    )
-                    raw_data = {name: np.nan for name in self.feature_names_out_}
-                    results.append(raw_data)
-                    continue
-
-                # Use isolate_peaks to filter by PeakRegions (domain knowledge filtering)
-                # Ensure intensities is 2D for the extractor (expects n_wavelengths x n_spectra)
-                if intensities.ndim == 1:
-                    intensities_2d = intensities.reshape(-1, 1)
-                else:
-                    intensities_2d = intensities
-
-                # Process regions one by one to handle missing data gracefully
-                raw_data = {}
-
-                for region_config in self._regions:
-                    try:
-                        # Try to extract this specific region
-                        region_results = self.extractor.isolate_peaks(
-                            wavelengths,
-                            intensities_2d,
-                            _convert_to_results_regions([region_config]),
-                            baseline_correction=self.config.baseline_correction,
-                            area_normalization=False,  # Keep raw intensities
-                        )
-
-                        # Process the single region result
-                        region_result = region_results[0]
-                        element = region_result.region.element
-                        region_wavelengths = region_result.wavelengths
-                        region_spectra = region_result.isolated_spectra  # Shape: (n_wavelengths, n_shots)
-
-                        # Average across shots (columns) to get single intensity per wavelength
-                        if region_spectra.ndim == 2:
-                            region_intensities = region_spectra.mean(axis=1)  # Average across shots
-                        else:
-                            region_intensities = region_spectra.flatten()
-
-                        # Check for NaN values in the averaged intensities
-                        if np.isnan(region_intensities).any():
-                            nan_mask = np.isnan(region_intensities)
-                            logger.debug("Found %d NaN values after averaging in %s region for sample %s",
-                                       np.sum(nan_mask), element, idx)
-                            region_intensities = np.nan_to_num(region_intensities, nan=0.0)
-
-                        # Add each wavelength point as a separate feature
-                        for wl, intensity in zip(region_wavelengths, region_intensities):
-                            feature_name = f"{element}_wl_{wl:.2f}nm"
-                            # Ensure no NaN values are stored
-                            if np.isnan(intensity):
-                                raw_data[feature_name] = 0.0
-                            else:
-                                raw_data[feature_name] = intensity
-
-                    except ValueError as e:
-                        # Region not found in spectrum - fill with zeros for this region
-                        element = region_config.element
-                        logger.debug("Region %s not found for sample %s: %s", element, idx, e)
-
-                        # Fill expected features for this region with zeros
-                        for feature_name in self.feature_names_out_:
-                            if feature_name.startswith(f"{element}_wl_"):
-                                raw_data[feature_name] = 0.0
-
-                results.append(raw_data)
-
-            except Exception as e:
-                logger.warning("Error processing sample %s: %s, filling with zeros instead of NaN", idx, e)
-                logger.warning("Failed to extract %d features for sample %s: %s",
-                             len(self.feature_names_out_), idx, list(self.feature_names_out_)[:10])
-                raw_data = {name: 0.0 for name in self.feature_names_out_}
-                results.append(raw_data)
+        # Use parallel processing if n_jobs != 1
+        if self.n_jobs == 1:
+            # Sequential processing
+            results = [self._process_single_sample(idx, row) for idx, row in X.iterrows()]
+        else:
+            # Parallel processing
+            from joblib import Parallel, delayed
+            logger.info(f"Processing {len(X)} samples in parallel with n_jobs={self.n_jobs}")
+            results = Parallel(n_jobs=self.n_jobs, backend='loky', verbose=0)(
+                delayed(self._process_single_sample)(idx, row) for idx, row in X.iterrows()
+            )
 
         # Create DataFrame with safe index handling
         index_to_use = X.index if hasattr(X, 'index') else None
@@ -911,8 +913,11 @@ def create_feature_pipeline(
         # Raw spectral data pipeline - domain knowledge filtering + minimal concentration features
         from src.features.concentration_features import MinimalConcentrationFeatures
 
+        # Use parallel processing if enabled
+        raw_n_jobs = n_jobs if use_parallel else 1
+
         steps = [
-            ("raw_spectral", RawSpectralTransformer(config=config)),
+            ("raw_spectral", RawSpectralTransformer(config=config, strategy=strategy, n_jobs=raw_n_jobs)),
             ("minimal_concentration", MinimalConcentrationFeatures()),
         ]
 

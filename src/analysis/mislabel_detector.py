@@ -266,7 +266,8 @@ class MislabelDetector:
 
             # Create raw spectral pipeline (only raw spectral transformer, no concentration features)
             # For clustering analysis, we don't need concentration-dependent features
-            raw_spectral_transformer = RawSpectralTransformer(config=self.config)
+            # Use "full_context" strategy to get all regions for comprehensive clustering analysis
+            raw_spectral_transformer = RawSpectralTransformer(config=self.config, strategy="full_context")
             feature_pipeline = Pipeline([
                 ("raw_spectral", raw_spectral_transformer)
             ])

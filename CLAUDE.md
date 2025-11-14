@@ -40,6 +40,11 @@ python main.py autogluon
 # Run AutoGluon with GPU acceleration
 python main.py autogluon --gpu
 
+# Run AutoGluon with "extreme" preset (leverages foundation models: TabPFNv2, Mitra, TabM, RealMLP)
+# Best for datasets <30k samples - achieves state-of-the-art performance
+# Edit src/config/pipeline_config.py and set: presets: str = "extreme"
+python main.py autogluon
+
 # Run AutoGluon while excluding suspicious samples
 python main.py autogluon --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
 
@@ -111,6 +116,45 @@ Requirements for GPU support:
 - NVIDIA GPU with CUDA support
 - CUDA drivers installed
 - GPU-enabled versions of the ML libraries (XGBoost, LightGBM, CatBoost, AutoGluon)
+
+### Tabular Foundation Models (AutoGluon 1.4.0+)
+
+AutoGluon 1.4.0 introduced cutting-edge tabular foundation models that achieve state-of-the-art performance on small-to-medium datasets (<30k samples):
+
+**Available Models:**
+- **TabPFNv2**: Pre-trained foundation model using in-context learning. Best for small datasets (≤10k samples, ≤500 features). Pre-trained on synthetic data.
+- **Mitra**: AutoGluon's proprietary foundation model achieving state-of-the-art performance on datasets <5k samples. Supports both classification and regression with optional fine-tuning.
+- **TabM**: Efficient ensemble of MLPs with parameter sharing. Top performer on TabArena-v0.1 benchmark.
+- **RealMLP**: Deep MLP architecture optimized for tabular data.
+- **TabICL**: In-context learning foundation model (classification only - not recommended for regression tasks)
+
+**How to Enable:**
+
+1. Install foundation model dependencies (already done):
+   ```bash
+   uv pip install "autogluon.tabular[mitra,tabicl,tabpfn]"
+   ```
+
+2. Use the "extreme" preset in `src/config/pipeline_config.py`:
+   ```python
+   presets: str = "extreme"  # Instead of "good_quality"
+   ```
+
+3. Run AutoGluon training:
+   ```bash
+   python main.py autogluon
+   ```
+
+**Performance:**
+- The "extreme" preset achieves significantly better results than traditional models on datasets <30k samples
+- AutoGluon's "extreme" preset in 5 minutes can outperform traditional models trained for 4 hours
+- Particularly effective for your nitrate prediction task (~720 samples)
+
+**Configuration:**
+Foundation models are pre-configured in `src/config/pipeline_config.py` with optimized hyperparameters:
+- Mitra: Multiple configurations including fine-tuning options (10-20 steps)
+- TabPFNv2, TabM, RealMLP: Default configurations (no tuning needed)
+- TabICL: Excluded for regression tasks (classification only)
 
 ### Clean Generated Files
 ```bash

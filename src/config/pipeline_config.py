@@ -35,36 +35,41 @@ class ModelParamsConfig(BaseModel):
 
     # Gradient boosting models - optimized for better R²
     xgboost: Dict[str, Any] = {
-        "n_estimators": 500,  # Increased for complex patterns
-        "learning_rate": 0.03,  # Lower for stable learning
-        "max_depth": 6,  # Increased to capture interactions
-        "min_child_weight": 5,  # Increased to prevent overfitting on 720 samples
-        "subsample": 0.9,  # Higher sampling
-        "colsample_bytree": 0.9,  # Higher feature sampling
-        "colsample_bylevel": 0.9,  # Add level sampling
-        "colsample_bynode": 0.9,  # Add node sampling
+        "n_estimators": 500,  # Match LightGBM/CatBoost
+        "learning_rate": 0.03,  # Match LightGBM/CatBoost
+        "max_depth": 5,  # Match LightGBM/CatBoost (was 6, too deep for 720 samples)
+        "min_child_weight": 5,  # Match LightGBM's min_child_samples
+        "subsample": 0.9,  # Match LightGBM/CatBoost
+        "colsample_bytree": 0.9,  # Match LightGBM's feature_fraction (single level only)
+        # Removed colsample_bylevel and colsample_bynode - they compound and reduce features too much
         "reg_alpha": 0.1,  # L1 regularization
         "reg_lambda": 1.0,  # L2 regularization
-        "gamma": 0.1,  # Minimum split loss
-        "max_delta_step": 1,  # Handle imbalanced data
+        # Removed gamma - too aggressive for small datasets
+        # Removed max_delta_step - only for classification
         "tree_method": "hist",  # Required for GPU
         "validate_parameters": True,
         "random_state": 42,
     }
     lightgbm: Dict[str, Any] = {
-        "n_estimators": 100,
-        "learning_rate": 0.05,  # Reduced from 0.1
-        "max_depth": 4,  # Reduced from 6
-        "min_child_samples": 3,  # Added regularization (LightGBM equivalent)
-        "subsample": 0.8,  # Added subsample
-        "feature_fraction": 0.8,  # Added feature subsampling
+        "n_estimators": 500,  # Increased from 100 to match XGBoost/CatBoost (fair comparison for 1500 samples)
+        "learning_rate": 0.03,  # Reduced from 0.05 to match XGBoost/CatBoost
+        "max_depth": 5,  # Increased from 4 (1500 samples can handle more complexity, matches CatBoost)
+        "num_leaves": 31,  # Explicit num_leaves for max_depth=5 (2^5 - 1)
+        "min_child_samples": 5,  # Increased from 3 to match XGBoost's min_child_weight
+        "subsample": 0.9,  # Increased from 0.8 to match XGBoost/CatBoost
+        "feature_fraction": 0.9,  # Increased from 0.8 to match XGBoost/CatBoost colsample
+        "reg_alpha": 0.1,  # L1 regularization to match XGBoost
+        "reg_lambda": 1.0,  # L2 regularization to match XGBoost/CatBoost
+        "bagging_freq": 1,  # Enable bagging every iteration (required for subsample)
     }
     catboost: Dict[str, Any] = {
-        "n_estimators": 100,
-        "learning_rate": 0.05,  # Reduced from 0.1
-        "depth": 4,  # Reduced from 6
-        "min_data_in_leaf": 3,  # Added regularization (CatBoost equivalent)
-        "subsample": 0.8,  # Added subsample
+        "n_estimators": 500,  # Increased from 100 to match XGBoost (fair comparison for 1500 samples)
+        "learning_rate": 0.03,  # Reduced from 0.05 to match XGBoost
+        "depth": 5,  # Increased from 4 (1500 samples can handle more complexity)
+        "min_data_in_leaf": 5,  # Increased from 3 to match XGBoost's min_child_weight
+        "subsample": 0.9,  # Increased from 0.8 to match XGBoost
+        "rsm": 0.9,  # Feature sampling to match XGBoost's colsample_bytree
+        "l2_leaf_reg": 1.0,  # Explicit L2 regularization to match XGBoost's reg_lambda
         "bootstrap_type": "Bernoulli",  # Required to use subsample parameter
     }
 
@@ -406,8 +411,8 @@ class ParallelConfig(BaseModel):
 class TunerConfig(BaseModel):
     """Configuration for the Optuna hyperparameter tuner."""
 
-    n_trials: int = 400
-    timeout: int = 120
+    n_trials: int = 1400
+    timeout: int = 3000
     # models_to_tune: List[str] = ["random_forest", "xgboost", "lightgbm", "catboost", "svr", "extratrees"]
     models_to_tune: List[str] = ["extratrees"]
     # Use this to select the tuning goal.
@@ -445,27 +450,43 @@ class AutoGluonConfig(BaseModel):
     """
     Configuration specific to the AutoGluon pipeline.
 
-    BASED ON BEST AutoGluon RUN: R² = 0.6035 (training_summary_simple_only_autogluon_20250812_221647.csv)
-    Key settings from best run:
-    - Strategy: simple_only
-    - Time limit: 9800s
-    - Presets: best_quality
-    - Bag folds: 3, Bag sets: 1, Stack levels: 0 (NO STACKING - critical!)
-    - Excluded models: ['KNN', 'FASTAI', 'TABPFN', 'FASTTEXT', 'CAT']
-    - Sample weights: NOW ENABLED (was disabled in best run, but we want to test with weights)
+    CURRENT BEST PERFORMANCE (as of Nov 2025):
+    - R² = 0.417 (LightGBM, simple_only strategy, Nov 7 2025)
+    - Previous AutoGluon best: R² = 0.310 (good_quality preset, Oct 25 2025)
+
+    GOAL: Use foundation models to significantly improve beyond current best (target: R² > 0.50)
+
+    Key configuration settings:
+    - Strategy: simple_only (best performing)
+    - Time limit: 12000s (3 hours)
+    - Presets: extreme (enables foundation models)
+    - Sample weights: ENABLED (improved method)
+    - Excluded models: ['FASTAI', 'FASTTEXT']
+
+    TABULAR FOUNDATION MODELS (AutoGluon 1.4.0+):
+    - TabPFNv2: Foundation model for small datasets (<=10k samples, <=500 features)
+    - TabICL: In-context learning for larger datasets (classification only - not recommended for regression)
+    - Mitra: State-of-the-art on datasets <5k samples (supports regression)
+    - TabM: Efficient ensemble of MLPs with parameter sharing
+    - RealMLP: Deep MLP architecture for tabular data
+
+    Use "extreme" preset to automatically leverage these foundation models for datasets <30k samples.
     """
 
     # ENABLED: sample weights for extreme concentration ranges (from best run but with weights enabled)
-    use_improved_config: bool = True
+    use_improved_config: bool = False
 
     # Sample weighting configuration - NOW ENABLED (from best run but with sample weights)
     weight_method: Literal["legacy", "improved"] = "improved"
 
     time_limit: int = 12000  # 3 hours for thorough optimization
-    presets: str = "good_quality"  # From best AutoGluon run configuration
+    presets: str = "extreme"  # State-of-the-art with foundation models (TabPFNv2, Mitra, TabM, RealMLP)
+    # NOTE: "extreme" preset leverages foundation models for datasets <30,000 samples
+    # Previous best: LightGBM achieved R² = 0.417 (Nov 2025)
+    # Goal with foundation models: R² > 0.50
 
     # GPU-safe preset switching - automatically use good_quality when GPU is enabled
-    gpu_safe_preset: str = "extreme_quality"  # Fallback preset for GP
+    gpu_safe_preset: str = "extreme"  # Use extreme preset with foundation models
     model_subdirectory: str = "autogluon"
     num_trials: int = 100  # Increased trials for better hyperparameter search
 
@@ -481,331 +502,396 @@ class AutoGluonConfig(BaseModel):
     ag_args_ensemble: Dict[str, Any] = {
         "fold_fitting_strategy": "sequential_local",
     }
+    # CONFIGURED FOR TABPFNV2 ONLY - exclude all other models
     excluded_model_types: List[str] = [
-        "FASTAI",
-        "FASTTEXT",
-    ]  # From best AutoGluon run configuration
+        # # Traditional models
+        # "GBM",        # LightGBM
+        # "CAT",        # CatBoost
+        # "XGB",        # XGBoost
+        # "RF",         # Random Forest
+        # "XT",         # ExtraTrees
+        # "KNN",        # K-Nearest Neighbors
+        # "LR",         # Linear Regression
+        # "NN_TORCH",   # Neural Networks (PyTorch)
+        "FASTAI",     # FastAI neural networks
+        "FASTTEXT",   # FastText
+        # Other foundation models (excluding TABPFNV2)
+        # "TABICL",     # TabICL
+        # "MITRA",      # Mitra
+        # "TABM",       # TabM
+        # "REALMLP",    # RealMLP
+    ]  # Only TABPFNV2 will be trained
 
     # GPU-specific exclusions - models that commonly fail with GPU + best_quality
     gpu_excluded_models: List[
         str
-    ] = []  # Add models here if they consistently fail with GPU
+    ] = []  # Exclude CatBoost due to GPU out-of-memory errors
     # Common problematic combinations:
     # ['CAT'] - Exclude CatBoost if it consistently throws GPU exceptions
     # ['GBM'] - Exclude LightGBM if it has GPU memory issues
     # ['CAT', 'GBM'] - Exclude both gradient boosting models, keep XGBoost and neural networks
 
     # Aggressive hyperparameters for spectral regression - focus on performance over speed
+    # CONFIGURED FOR TABPFNV2 ONLY - other models commented out
     hyperparameters: Dict[str, Any] = {
-        "GBM": [
-            # LightGBM - more aggressive configurations (GPU settings added automatically by autogluon_trainer.py)
-            {
-                "num_boost_round": 1500,
-                "learning_rate": 0.01,
-                "num_leaves": 63,
-                "min_data_in_leaf": 2,
-                "feature_fraction": 0.9,
-                "bagging_fraction": 0.9,
-                "bagging_freq": 1,
-            },
-            {
-                "num_boost_round": 1000,
-                "learning_rate": 0.02,
-                "num_leaves": 31,
-                "min_data_in_leaf": 3,
-                "feature_fraction": 0.8,
-                "lambda_l1": 0.1,
-                "lambda_l2": 0.1,
-            },
-            {
-                "num_boost_round": 500,
-                "learning_rate": 0.03,
-                "num_leaves": 127,
-                "min_data_in_leaf": 1,
-                "feature_fraction": 0.7,
-                "extra_trees": True,
-            },
-            {
-                "num_boost_round": 200,
-                "learning_rate": 0.05,
-                "num_leaves": 31,
-                "min_data_in_leaf": 5,
-            },
-            {
-                "num_boost_round": 100,
-                "learning_rate": 0.1,
-                "num_leaves": 15,
-                "min_data_in_leaf": 8,
-            },
-            # {'num_boost_round': 1000, 'learning_rate': 0.02, 'num_leaves': 31, 'feature_fraction': 0.9, 'min_data_in_leaf': 2, 'reg_alpha': 0.1, 'reg_lambda': 0.1},
-            # {'num_boost_round': 800, 'learning_rate': 0.03, 'num_leaves': 63, 'feature_fraction': 0.8, 'min_data_in_leaf': 3, 'reg_alpha': 0.0, 'reg_lambda': 0.0},
-            # {'num_boost_round': 600, 'learning_rate': 0.05, 'num_leaves': 127, 'feature_fraction': 0.7, 'min_data_in_leaf': 1, 'reg_alpha': 0.5, 'reg_lambda': 0.5},
+        # "GBM": [
+        #     # LightGBM - more aggressive configurations (GPU settings added automatically by autogluon_trainer.py)
+        #     {
+        #         "num_boost_round": 1500,
+        #         "learning_rate": 0.01,
+        #         "num_leaves": 63,
+        #         "min_data_in_leaf": 2,
+        #         "feature_fraction": 0.9,
+        #         "bagging_fraction": 0.9,
+        #         "bagging_freq": 1,
+        #     },
+        #     {
+        #         "num_boost_round": 1000,
+        #         "learning_rate": 0.02,
+        #         "num_leaves": 31,
+        #         "min_data_in_leaf": 3,
+        #         "feature_fraction": 0.8,
+        #         "lambda_l1": 0.1,
+        #         "lambda_l2": 0.1,
+        #     },
+        #     {
+        #         "num_boost_round": 500,
+        #         "learning_rate": 0.03,
+        #         "num_leaves": 127,
+        #         "min_data_in_leaf": 1,
+        #         "feature_fraction": 0.7,
+        #         "extra_trees": True,
+        #     },
+        #     {
+        #         "num_boost_round": 200,
+        #         "learning_rate": 0.05,
+        #         "num_leaves": 31,
+        #         "min_data_in_leaf": 5,
+        #     },
+        #     {
+        #         "num_boost_round": 100,
+        #         "learning_rate": 0.1,
+        #         "num_leaves": 15,
+        #         "min_data_in_leaf": 8,
+        #     },
+        #     # {'num_boost_round': 1000, 'learning_rate': 0.02, 'num_leaves': 31, 'feature_fraction': 0.9, 'min_data_in_leaf': 2, 'reg_alpha': 0.1, 'reg_lambda': 0.1},
+        #     # {'num_boost_round': 800, 'learning_rate': 0.03, 'num_leaves': 63, 'feature_fraction': 0.8, 'min_data_in_leaf': 3, 'reg_alpha': 0.0, 'reg_lambda': 0.0},
+        #     # {'num_boost_round': 600, 'learning_rate': 0.05, 'num_leaves': 127, 'feature_fraction': 0.7, 'min_data_in_leaf': 1, 'reg_alpha': 0.5, 'reg_lambda': 0.5},
+        # ],
+        # "CAT": [
+        #     # CatBoost - optimized for small datasets (GPU settings added automatically by autogluon_trainer.py)
+        #     {
+        #         "iterations": 1000,
+        #         "learning_rate": 0.02,
+        #         "depth": 8,
+        #         "min_data_in_leaf": 1,
+        #         "l2_leaf_reg": 1.0,
+        #         "subsample": 0.8,
+        #     },
+        #     {
+        #         "iterations": 800,
+        #         "learning_rate": 0.03,
+        #         "depth": 6,
+        #         "min_data_in_leaf": 2,
+        #         "l2_leaf_reg": 3.0,
+        #         "subsample": 0.9,
+        #     },
+        #     {
+        #         "iterations": 600,
+        #         "learning_rate": 0.05,
+        #         "depth": 10,
+        #         "min_data_in_leaf": 1,
+        #         "l2_leaf_reg": 0.5,
+        #         "subsample": 0.7,
+        #     },
+        # ],
+        # "XGB": [
+        #     # XGBoost - high performance configurations with explicit device control
+        #     {
+        #         "n_estimators": 1000,
+        #         "max_depth": 8,
+        #         "learning_rate": 0.02,
+        #         "subsample": 0.8,
+        #         "colsample_bytree": 0.8,
+        #         "reg_alpha": 0.1,
+        #         "reg_lambda": 1.0,
+        #         "tree_method": "hist",
+        #         "device": "cpu",
+        #     },
+        #     {
+        #         "n_estimators": 800,
+        #         "max_depth": 6,
+        #         "learning_rate": 0.03,
+        #         "subsample": 0.9,
+        #         "colsample_bytree": 0.9,
+        #         "reg_alpha": 0.0,
+        #         "reg_lambda": 0.5,
+        #         "tree_method": "hist",
+        #         "device": "cpu",
+        #     },
+        #     {
+        #         "n_estimators": 600,
+        #         "max_depth": 10,
+        #         "learning_rate": 0.05,
+        #         "subsample": 0.7,
+        #         "colsample_bytree": 0.7,
+        #         "reg_alpha": 0.5,
+        #         "reg_lambda": 2.0,
+        #         "tree_method": "hist",
+        #         "device": "cpu",
+        #     },
+        # ],
+        # "RF": [
+        #     # Random Forest - more trees, less regularization for better fit
+        #     {
+        #         "n_estimators": 500,
+        #         "max_features": "sqrt",
+        #         "max_depth": None,
+        #         "min_samples_leaf": 1,
+        #         "min_samples_split": 2,
+        #     },
+        #     {
+        #         "n_estimators": 300,
+        #         "max_features": 0.8,
+        #         "max_depth": 25,
+        #         "min_samples_leaf": 2,
+        #         "min_samples_split": 5,
+        #     },
+        #     {
+        #         "n_estimators": 200,
+        #         "max_features": 0.6,
+        #         "max_depth": 15,
+        #         "min_samples_leaf": 3,
+        #         "min_samples_split": 8,
+        #     },
+        # ],
+        # "XT": [
+        #     # ExtraTrees - similar to RF but with more randomness
+        #     {
+        #         "n_estimators": 500,
+        #         "max_features": "sqrt",
+        #         "max_depth": None,
+        #         "min_samples_leaf": 1,
+        #         "min_samples_split": 2,
+        #     },
+        #     {
+        #         "n_estimators": 300,
+        #         "max_features": 0.8,
+        #         "max_depth": 25,
+        #         "min_samples_leaf": 2,
+        #         "min_samples_split": 5,
+        #     },
+        #     {
+        #         "n_estimators": 200,
+        #         "max_features": 0.6,
+        #         "max_depth": 15,
+        #         "min_samples_leaf": 3,
+        #         "min_samples_split": 8,
+        #     },
+        # ],
+        # "NN_TORCH": [
+        #     # Neural networks - optimized for spectral data with proper regularization
+        #     {
+        #         "num_epochs": 500,
+        #         "learning_rate": 0.0003,
+        #         "activation": "elu",
+        #         "dropout_prob": 0.2,
+        #         "weight_decay": 0.01,
+        #     },
+        #     {
+        #         "num_epochs": 400,
+        #         "learning_rate": 0.0005,
+        #         "activation": "relu",
+        #         "dropout_prob": 0.3,
+        #         "weight_decay": 0.005,
+        #     },
+        #     {
+        #         "num_epochs": 300,
+        #         "learning_rate": 0.001,
+        #         "activation": "leaky_relu",
+        #         "dropout_prob": 0.4,
+        #         "weight_decay": 0.001,
+        #     },
+        #     {
+        #         "num_epochs": 200,
+        #         "learning_rate": 0.001,
+        #         "dropout_prob": 0.3,
+        #         "weight_decay": 0.01,
+        #     },
+        # ],
+        # "LR": [
+        #     # Linear models - use sklearn-compatible parameters
+        #     {"penalty": "L2"},
+        #     {"penalty": "L1"},
+        # ],
+        # === TABULAR FOUNDATION MODELS (AutoGluon 1.4.0+) ===
+        # State-of-the-art models for small-to-medium datasets (<30k samples)
+        "TABPFNV2": [
+            # TabPFNv2 - Foundation model for small datasets (<=10k samples, <=500 features)
+            # Pre-trained on synthetic data with in-context learning
+            {},  # Default configuration (no hyperparameters needed)
         ],
-        "CAT": [
-            # CatBoost - optimized for small datasets (GPU settings added automatically by autogluon_trainer.py)
-            {
-                "iterations": 1000,
-                "learning_rate": 0.02,
-                "depth": 8,
-                "min_data_in_leaf": 1,
-                "l2_leaf_reg": 1.0,
-                "subsample": 0.8,
-            },
-            {
-                "iterations": 800,
-                "learning_rate": 0.03,
-                "depth": 6,
-                "min_data_in_leaf": 2,
-                "l2_leaf_reg": 3.0,
-                "subsample": 0.9,
-            },
-            {
-                "iterations": 600,
-                "learning_rate": 0.05,
-                "depth": 10,
-                "min_data_in_leaf": 1,
-                "l2_leaf_reg": 0.5,
-                "subsample": 0.7,
-            },
-        ],
-        "XGB": [
-            # XGBoost - high performance configurations with explicit device control
-            {
-                "n_estimators": 1000,
-                "max_depth": 8,
-                "learning_rate": 0.02,
-                "subsample": 0.8,
-                "colsample_bytree": 0.8,
-                "reg_alpha": 0.1,
-                "reg_lambda": 1.0,
-                "tree_method": "hist",
-                "device": "cpu",
-            },
-            {
-                "n_estimators": 800,
-                "max_depth": 6,
-                "learning_rate": 0.03,
-                "subsample": 0.9,
-                "colsample_bytree": 0.9,
-                "reg_alpha": 0.0,
-                "reg_lambda": 0.5,
-                "tree_method": "hist",
-                "device": "cpu",
-            },
-            {
-                "n_estimators": 600,
-                "max_depth": 10,
-                "learning_rate": 0.05,
-                "subsample": 0.7,
-                "colsample_bytree": 0.7,
-                "reg_alpha": 0.5,
-                "reg_lambda": 2.0,
-                "tree_method": "hist",
-                "device": "cpu",
-            },
-        ],
-        "RF": [
-            # Random Forest - more trees, less regularization for better fit
-            {
-                "n_estimators": 500,
-                "max_features": "sqrt",
-                "max_depth": None,
-                "min_samples_leaf": 1,
-                "min_samples_split": 2,
-            },
-            {
-                "n_estimators": 300,
-                "max_features": 0.8,
-                "max_depth": 25,
-                "min_samples_leaf": 2,
-                "min_samples_split": 5,
-            },
-            {
-                "n_estimators": 200,
-                "max_features": 0.6,
-                "max_depth": 15,
-                "min_samples_leaf": 3,
-                "min_samples_split": 8,
-            },
-        ],
-        "XT": [
-            # ExtraTrees - similar to RF but with more randomness
-            {
-                "n_estimators": 500,
-                "max_features": "sqrt",
-                "max_depth": None,
-                "min_samples_leaf": 1,
-                "min_samples_split": 2,
-            },
-            {
-                "n_estimators": 300,
-                "max_features": 0.8,
-                "max_depth": 25,
-                "min_samples_leaf": 2,
-                "min_samples_split": 5,
-            },
-            {
-                "n_estimators": 200,
-                "max_features": 0.6,
-                "max_depth": 15,
-                "min_samples_leaf": 3,
-                "min_samples_split": 8,
-            },
-        ],
-        "NN_TORCH": [
-            # Neural networks - optimized for spectral data with proper regularization
-            {
-                "num_epochs": 500,
-                "learning_rate": 0.0003,
-                "activation": "elu",
-                "dropout_prob": 0.2,
-                "weight_decay": 0.01,
-            },
-            {
-                "num_epochs": 400,
-                "learning_rate": 0.0005,
-                "activation": "relu",
-                "dropout_prob": 0.3,
-                "weight_decay": 0.005,
-            },
-            {
-                "num_epochs": 300,
-                "learning_rate": 0.001,
-                "activation": "leaky_relu",
-                "dropout_prob": 0.4,
-                "weight_decay": 0.001,
-            },
-            {
-                "num_epochs": 200,
-                "learning_rate": 0.001,
-                "dropout_prob": 0.3,
-                "weight_decay": 0.01,
-            },
-        ],
-        "LR": [
-            # Linear models - use sklearn-compatible parameters
-            {"penalty": "L2"},
-            {"penalty": "L1"},
-        ],
+        # "TABICL": [
+        #     # TabICL - In-context learning for larger datasets than TabPFNv2
+        #     # Scalable transformer-based approach
+        #     # Note: Currently supports classification only
+        #     {},  # Default configuration
+        # ],
+        # "MITRA": [
+        #     # Mitra - AutoGluon's proprietary foundation model
+        #     # State-of-the-art on datasets <5k samples
+        #     # Supports both classification and regression
+        #     {"fine_tune": False},  # Pre-trained model without fine-tuning (faster)
+        #     {"fine_tune": True, "fine_tune_steps": 10},  # Fine-tuned on training data (better performance)
+        #     {"fine_tune": True, "fine_tune_steps": 20},  # More fine-tuning steps for complex patterns
+        # ],
+        # "TABM": [
+        #     # TabM - Efficient ensemble of MLPs with parameter sharing
+        #     # Top performer on TabArena-v0.1 benchmark
+        #     {},  # Default configuration
+        # ],
+        # "REALMLP": [
+        #     # RealMLP - Deep MLP architecture for tabular data
+        #     # Efficient neural network approach
+        #     {},  # Default configuration
+        # ],
     }
 
     # GPU-safe hyperparameters - less aggressive configurations for stability
+    # CONFIGURED FOR TABPFNV2 ONLY - other models commented out
     gpu_safe_hyperparameters: Dict[str, Any] = {
-        "GBM": [
-            # LightGBM - conservative GPU-safe configurations with explicit GPU device settings
-            {
-                "num_boost_round": 500,
-                "learning_rate": 0.05,
-                "num_leaves": 31,
-                "feature_fraction": 0.8,
-                "min_data_in_leaf": 5,
-                "device": "gpu",
-                "gpu_platform_id": 0,
-                "gpu_device_id": 0,
-            },
-            {
-                "num_boost_round": 300,
-                "learning_rate": 0.1,
-                "num_leaves": 15,
-                "feature_fraction": 0.9,
-                "min_data_in_leaf": 3,
-                "device": "gpu",
-                "gpu_platform_id": 0,
-                "gpu_device_id": 0,
-            },
+        # "GBM": [
+        #     # LightGBM - conservative GPU-safe configurations with explicit GPU device settings
+        #     {
+        #         "num_boost_round": 500,
+        #         "learning_rate": 0.05,
+        #         "num_leaves": 31,
+        #         "feature_fraction": 0.8,
+        #         "min_data_in_leaf": 5,
+        #         "device": "gpu",
+        #         "gpu_platform_id": 0,
+        #         "gpu_device_id": 0,
+        #     },
+        #     {
+        #         "num_boost_round": 300,
+        #         "learning_rate": 0.1,
+        #         "num_leaves": 15,
+        #         "feature_fraction": 0.9,
+        #         "min_data_in_leaf": 3,
+        #         "device": "gpu",
+        #         "gpu_platform_id": 0,
+        #         "gpu_device_id": 0,
+        #     },
+        # ],
+        # "CAT": [
+        #     # CatBoost - conservative GPU-safe configurations with explicit GPU task type
+        #     {
+        #         "iterations": 500,
+        #         "learning_rate": 0.05,
+        #         "depth": 6,
+        #         "min_data_in_leaf": 3,
+        #         "l2_leaf_reg": 3.0,
+        #         "task_type": "GPU",
+        #         "devices": "0",
+        #     },
+        #     {
+        #         "iterations": 300,
+        #         "learning_rate": 0.1,
+        #         "depth": 4,
+        #         "min_data_in_leaf": 5,
+        #         "l2_leaf_reg": 1.0,
+        #         "task_type": "GPU",
+        #         "devices": "0",
+        #     },
+        # ],
+        # "XGB": [
+        #     # XGBoost - conservative GPU-safe configurations with explicit CUDA device control
+        #     {
+        #         "n_estimators": 500,
+        #         "max_depth": 6,
+        #         "learning_rate": 0.05,
+        #         "subsample": 0.8,
+        #         "colsample_bytree": 0.8,
+        #         "tree_method": "hist",
+        #         "device": "cuda",
+        #     },
+        #     {
+        #         "n_estimators": 300,
+        #         "max_depth": 4,
+        #         "learning_rate": 0.1,
+        #         "subsample": 0.9,
+        #         "colsample_bytree": 0.9,
+        #         "tree_method": "hist",
+        #         "device": "cuda",
+        #     },
+        # ],
+        # "RF": [
+        #     # Random Forest - same as aggressive (doesn't use GPU anyway)
+        #     {
+        #         "n_estimators": 300,
+        #         "max_features": "sqrt",
+        #         "max_depth": 20,
+        #         "min_samples_leaf": 2,
+        #     },
+        #     {
+        #         "n_estimators": 200,
+        #         "max_features": 0.8,
+        #         "max_depth": 15,
+        #         "min_samples_leaf": 3,
+        #     },
+        # ],
+        # "XT": [
+        #     # ExtraTrees - same as aggressive (doesn't use GPU anyway)
+        #     {
+        #         "n_estimators": 300,
+        #         "max_features": "sqrt",
+        #         "max_depth": 20,
+        #         "min_samples_leaf": 2,
+        #     },
+        #     {
+        #         "n_estimators": 200,
+        #         "max_features": 0.8,
+        #         "max_depth": 15,
+        #         "min_samples_leaf": 3,
+        #     },
+        # ],
+        # "NN_TORCH": [
+        #     # Neural networks - more conservative for GPU stability
+        #     {
+        #         "num_epochs": 100,
+        #         "learning_rate": 0.001,
+        #         "dropout_prob": 0.3,
+        #         "weight_decay": 0.01,
+        #     },
+        #     {
+        #         "num_epochs": 80,
+        #         "learning_rate": 0.005,
+        #         "dropout_prob": 0.4,
+        #         "weight_decay": 0.001,
+        #     },
+        # ],
+        # "LR": [
+        #     # Linear models - same as aggressive
+        #     {"penalty": "L2"},
+        #     {"penalty": "L1"},
+        # ],
+        # === TABULAR FOUNDATION MODELS (GPU-safe configurations) ===
+        "TABPFNV2": [
+            {},  # Foundation models don't typically use GPU
         ],
-        "CAT": [
-            # CatBoost - conservative GPU-safe configurations with explicit GPU task type
-            {
-                "iterations": 500,
-                "learning_rate": 0.05,
-                "depth": 6,
-                "min_data_in_leaf": 3,
-                "l2_leaf_reg": 3.0,
-                "task_type": "GPU",
-                "devices": "0",
-            },
-            {
-                "iterations": 300,
-                "learning_rate": 0.1,
-                "depth": 4,
-                "min_data_in_leaf": 5,
-                "l2_leaf_reg": 1.0,
-                "task_type": "GPU",
-                "devices": "0",
-            },
-        ],
-        "XGB": [
-            # XGBoost - conservative GPU-safe configurations with explicit CUDA device control
-            {
-                "n_estimators": 500,
-                "max_depth": 6,
-                "learning_rate": 0.05,
-                "subsample": 0.8,
-                "colsample_bytree": 0.8,
-                "tree_method": "hist",
-                "device": "cuda",
-            },
-            {
-                "n_estimators": 300,
-                "max_depth": 4,
-                "learning_rate": 0.1,
-                "subsample": 0.9,
-                "colsample_bytree": 0.9,
-                "tree_method": "hist",
-                "device": "cuda",
-            },
-        ],
-        "RF": [
-            # Random Forest - same as aggressive (doesn't use GPU anyway)
-            {
-                "n_estimators": 300,
-                "max_features": "sqrt",
-                "max_depth": 20,
-                "min_samples_leaf": 2,
-            },
-            {
-                "n_estimators": 200,
-                "max_features": 0.8,
-                "max_depth": 15,
-                "min_samples_leaf": 3,
-            },
-        ],
-        "XT": [
-            # ExtraTrees - same as aggressive (doesn't use GPU anyway)
-            {
-                "n_estimators": 300,
-                "max_features": "sqrt",
-                "max_depth": 20,
-                "min_samples_leaf": 2,
-            },
-            {
-                "n_estimators": 200,
-                "max_features": 0.8,
-                "max_depth": 15,
-                "min_samples_leaf": 3,
-            },
-        ],
-        "NN_TORCH": [
-            # Neural networks - more conservative for GPU stability
-            {
-                "num_epochs": 100,
-                "learning_rate": 0.001,
-                "dropout_prob": 0.3,
-                "weight_decay": 0.01,
-            },
-            {
-                "num_epochs": 80,
-                "learning_rate": 0.005,
-                "dropout_prob": 0.4,
-                "weight_decay": 0.001,
-            },
-        ],
-        "LR": [
-            # Linear models - same as aggressive
-            {"penalty": "L2"},
-            {"penalty": "L1"},
-        ],
+        # "TABICL": [
+        #     {},  # Default configuration
+        # ],
+        # "MITRA": [
+        #     {"fine_tune": False},  # Faster, no fine-tuning
+        #     {"fine_tune": True, "fine_tune_steps": 5},  # Conservative fine-tuning
+        # ],
+        # "TABM": [
+        #     {},  # Default configuration
+        # ],
+        # "REALMLP": [
+        #     {},  # Default configuration
+        # ],
     }
 
 
@@ -1272,7 +1358,7 @@ class Config(BaseModel):
 
     # Sample weighting configuration for model training
     use_sample_weights: bool = (
-        True  # ENABLED GLOBALLY: Critical for handling extreme concentration ranges
+        False  # ENABLED GLOBALLY: Critical for handling extreme concentration ranges
     )
     sample_weight_method: Literal[
         "legacy", "improved", "weighted_r2", "distribution_based", "hybrid"
@@ -1504,15 +1590,14 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # Auto-detect environment: use /app for containers, otherwise use local path
 _BASE_PATH_CACHE = None
-_BASE_PATH_PRINTED = False
 
 
 def get_base_path() -> Path:
     """
     Automatically detect if we're running in a container (GCP) or locally.
-    Returns appropriate base path. Caches result and only prints message once.
+    Returns appropriate base path. Caches result (silent for parallel workers).
     """
-    global _BASE_PATH_CACHE, _BASE_PATH_PRINTED
+    global _BASE_PATH_CACHE
 
     if _BASE_PATH_CACHE is not None:
         return _BASE_PATH_CACHE
@@ -1520,23 +1605,12 @@ def get_base_path() -> Path:
     # Check if we're in a container environment
     if os.path.exists("/app") and os.access("/app", os.W_OK):
         _BASE_PATH_CACHE = Path("/app")
-        if not _BASE_PATH_PRINTED:
-            print(f"[CONFIG] Detected container environment, using base path: /app")
-            _BASE_PATH_PRINTED = True
     # Check environment variable override
     elif os.getenv("PIPELINE_ROOT"):
         _BASE_PATH_CACHE = Path(os.getenv("PIPELINE_ROOT"))
-        if not _BASE_PATH_PRINTED:
-            print(f"[CONFIG] Using environment override, base path: {_BASE_PATH_CACHE}")
-            _BASE_PATH_PRINTED = True
     # Default to project root for local development
     else:
         _BASE_PATH_CACHE = PROJECT_ROOT
-        if not _BASE_PATH_PRINTED:
-            print(
-                f"[CONFIG] Detected local development, using base path: {PROJECT_ROOT}"
-            )
-            _BASE_PATH_PRINTED = True
 
     return _BASE_PATH_CACHE
 

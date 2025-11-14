@@ -296,6 +296,9 @@ class SpectralPreprocessor:
                 W = sparse.spdiags(w, 0, L, L)
                 Z = W + self.als_lambda * D.dot(D.transpose())
 
+                # Convert to CSC format for efficient sparse solving (suppresses warning)
+                Z = Z.tocsc()
+
                 # Solve for baseline
                 z = spsolve(Z, w * spectrum)
 
